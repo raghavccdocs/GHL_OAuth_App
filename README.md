@@ -1,4 +1,4 @@
-# GHL OAuth Application
+# GHL OAuth Application (Just the draft for testing leads)
 
 A secure, read-only OAuth application for GoHighLevel (GHL) that ensures existing CRM data remains protected and untouched.
 
