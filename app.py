@@ -36,9 +36,9 @@ TOKENS_FILE = 'tokens.json' # Original tokens file name from your friend's code
 AUDIT_LOG_FILE = 'data_operations.log'
 
 # Constants for data protection
-READ_ONLY_SCOPES = ['contacts.readonly']  # Only read-only scopes allowed
+READ_ONLY_SCOPES = ['contacts.readonly', 'calendars.readonly', 'locations.readonly', 'calendars/events.readonly', 'forms.readonly']  # Only read-only scopes allowed
 ALLOWED_HTTP_METHODS = ['GET']  # Only GET requests allowed
-API_VERSION = '2021-04-15'  # Fixed API version to prevent unexpected changes
+API_VERSION = '2021-07-28'  # Updated to match the contacts endpoint requirement
 
 # API endpoints for connectivity check
 API_ENDPOINTS = {
@@ -56,6 +56,7 @@ API_ENDPOINTS = {
     }
 }
 
+LOCATION_ID = 'lXV966Pcd9wrEyyOdDNa'
 
 # --- REMOVED: OAuthCallbackHandler class as it's for the local server
 
@@ -88,7 +89,7 @@ def verify_data_protection(data_operation):
         return True
     return False
 
-def verify_api_request(method, endpoint):
+def     verify_api_request(method, endpoint):
     """Verify that the API request complies with data protection rules"""
     if method not in ALLOWED_HTTP_METHODS:
         log_operation('protection_violation', {
@@ -300,184 +301,3 @@ def verify_api_connectivity():
     if not all_connected:
         print("\nConnection issues detected. Please check:")
         print("1. Your internet connection")
-        print("2. DNS settings (try using 8.8.8.8 or 1.1.1.1 as DNS servers)")
-        print("3. Firewall settings (ensure outbound HTTPS traffic is allowed)")
-        print("4. VPN connection (if using)")
-        print("5. If using a proxy, ensure it's properly configured")
-        print("\nIf the issue persists:")
-        print("- Try accessing https://marketplace.gohighlevel.com in your browser")
-        print("- Check if you can ping services.gohighlevel.com")
-        print("- Verify your network's SSL/TLS settings")
-        return False
-    
-    print("\nAll required API endpoints are accessible.")
-    return True
-
-def validate_config():
-    """Validate that all required configuration is present"""
-    if not CLIENT_ID:
-        raise ValueError("GHL_CLIENT_ID environment variable is not set")
-    if not CLIENT_SECRET:
-        raise ValueError("GHL_CLIENT_SECRET environment variable is not set")
-    return True
-
-def manual_authorize():
-    """Prompt user to manually authorize and paste in the code from redirect URI"""
-    print("\nPlease complete the following steps:")
-    print("1. Visit this URL in your browser to authorize the app:")
-    auth_params = {
-        'response_type': 'code',
-        'client_id': CLIENT_ID,
-        'redirect_uri': REDIRECT_URI,
-        'scope': ' '.join(READ_ONLY_SCOPES)
-    }
-    auth_url = f"{AUTH_URL}?{urllib.parse.urlencode(auth_params)}"
-    print(f"\n🔗 Authorization URL:\n{auth_url}")
-
-    print("\n2. After logging in, you’ll be redirected to:")
-    print(f"{REDIRECT_URI}?code=YOUR_CODE_HERE")
-    print("Copy the code parameter from the URL and paste it below:")
-
-    code = input("\nPaste the code here: ").strip()
-
-    # Exchange code for tokens
-    try:
-        response = requests.post(TOKEN_URL, data={
-            'client_id': CLIENT_ID,
-            'client_secret': CLIENT_SECRET,
-            'grant_type': 'authorization_code',
-            'code': code,
-            'redirect_uri': REDIRECT_URI
-        })
-        response.raise_for_status()
-        tokens = response.json()
-        if save_tokens(tokens):
-            print("\n✅ Authorization successful. Tokens saved.")
-            return tokens['access_token']
-        else:
-            print("\n❌ Failed to save tokens.")
-            return None
-    except requests.exceptions.HTTPError as e:
-        print(f"\nHTTP error during token exchange: {e.response.status_code} - {e.response.text}")
-        log_operation('auth_error', {
-            'step': 'exchange',
-            'reason': e.response.text,
-            'status_code': e.response.status_code
-        })
-        return None
-    except Exception as e:
-        print(f"\nError during manual authorization: {e}")
-        log_operation('auth_error', {
-            'step': 'exchange',
-            'reason': str(e)
-        })
-        return None
-
-
-def main():
-    try:
-        print("== GHL OAuth Authentication ==")
-        print("\nData Protection Rules:")
-        print("1. Existing data is strictly read-only")
-        print("2. No updates or modifications to existing records")
-        print("3. No overwriting of existing data")
-        print("4. New data additions must be done in a way that doesn't affect existing records")
-        print("5. All operations are logged for audit purposes")
-        
-        # Check connectivity before proceeding
-        if not verify_api_connectivity():
-            print("\nCannot proceed due to connectivity issues.")
-            exit(1)
-        
-        # Get a valid access token
-        access_token = get_valid_access_token()
-        
-        if access_token:
-            print("\nSuccessfully obtained/refreshed Access Token.")
-            print(f"You can now use this token for API calls (e.g., first 10 chars: {access_token[:10]}...)")
-            
-            # Example API Call with enhanced protection
-            print("\nAttempting a test API call (Get Contacts)...")
-            try:
-                if not verify_api_request('GET', 'contacts'):
-                    raise Exception("API request violates data protection rules")
-                    
-                headers = {
-                    'Authorization': f'Bearer {access_token}',
-                    'Version': API_VERSION,
-                    'Accept': 'application/json'
-                }
-                
-                # Add timeout and retry logic for API call
-                session = requests.Session()
-                retries = 3
-                timeout = 10  # seconds
-                
-                for attempt in range(retries):
-                    try:
-                        response = session.get(
-                            'https://services.leadconnectorhq.com/contacts/',
-                            headers=headers,
-                            timeout=timeout
-                        )
-                        response.raise_for_status()
-                        break
-                    except (ConnectionError, Timeout) as e:
-                        if attempt == retries - 1:  # Last attempt
-                            raise
-                        print(f"API call attempt {attempt + 1} failed. Retrying...")
-                        time.sleep(2 ** attempt)  # Exponential backoff
-                
-                contacts = response.json().get('contacts', [])
-                print(f"Successfully fetched {len(contacts)} contacts.")
-                if contacts:
-                    # Only display non-sensitive information
-                    print(f"First contact found (ID: {contacts[0].get('id')})")
-                log_operation('api_call_success', {
-                    'endpoint': 'contacts',
-                    'count': len(contacts),
-                    'method': 'GET'
-                })
-            except ConnectionError as e:
-                print(f"\nConnection error: Could not connect to GHL services. Please check your internet connection.")
-                print(f"Technical details: {str(e)}")
-                log_operation('api_call_failed', {
-                    'endpoint': 'contacts',
-                    'reason': f"Connection error: {str(e)}"
-                })
-            except Timeout as e:
-                print(f"\nConnection timeout: The request took too long to complete.")
-                print(f"Technical details: {str(e)}")
-                log_operation('api_call_failed', {
-                    'endpoint': 'contacts',
-                    'reason': f"Timeout error: {str(e)}"
-                })
-            except requests.exceptions.HTTPError as e:
-                print(f"API call failed: {e.response.status_code} - {e.response.text}")
-                log_operation('api_call_failed', {
-                    'endpoint': 'contacts',
-                    'reason': e.response.text,
-                    'status_code': e.response.status_code
-                })
-            except Exception as e:
-                print(f"An error occurred during API call: {e}")
-                log_operation('api_call_failed', {
-                    'endpoint': 'contacts',
-                    'reason': str(e)
-                })
-        else:
-            print("\nFailed to obtain Access Token. Please ensure your .env is correct and you followed the manual steps.")
-            log_operation('authentication_final_failure', {'reason': 'Could not get access token'})
-            exit(1)
-            
-    except ValueError as e:
-        print(f"\nConfiguration error: {e}")
-        print("Please ensure you have set up your .env file correctly with GHL_CLIENT_ID and GHL_CLIENT_SECRET.")
-        exit(1)
-    except Exception as e:
-        print(f"\nAn unexpected error occurred in main: {e}")
-        log_operation('script_error', {'reason': str(e)})
-        exit(1)
-
-if __name__ == '__main__':
-    main()
