@@ -31,7 +31,7 @@ CLIENT_SECRET = os.getenv('GHL_CLIENT_SECRET')
 # even though we are not running a local server to catch it.
 REDIRECT_URI = os.getenv('GHL_REDIRECT_URI', 'http://localhost:8000/callback') 
 AUTH_URL = 'https://marketplace.gohighlevel.com/oauth/chooselocation' # Original Auth URL from your friend's code
-TOKEN_URL = 'https://services.gohighlevel.com/oauth/token' # Original Token URL from your friend's code
+TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/token' # Updated for LeadConnector (correct domain)
 TOKENS_FILE = 'tokens.json' # Original tokens file name from your friend's code
 AUDIT_LOG_FILE = 'data_operations.log'
 
@@ -49,12 +49,13 @@ API_ENDPOINTS = {
         'method': 'GET'
     },
     'services': {
-        'host': 'services.gohighlevel.com',
+        'host': 'services.leadconnectorhq.com',  # ✅ correct
         'port': 443,
         'path': '/oauth/token',
         'method': 'POST'
     }
 }
+
 
 # --- REMOVED: OAuthCallbackHandler class as it's for the local server
 
@@ -320,10 +321,62 @@ def validate_config():
         raise ValueError("GHL_CLIENT_SECRET environment variable is not set")
     return True
 
+def manual_authorize():
+    """Prompt user to manually authorize and paste in the code from redirect URI"""
+    print("\nPlease complete the following steps:")
+    print("1. Visit this URL in your browser to authorize the app:")
+    auth_params = {
+        'response_type': 'code',
+        'client_id': CLIENT_ID,
+        'redirect_uri': REDIRECT_URI,
+        'scope': ' '.join(READ_ONLY_SCOPES)
+    }
+    auth_url = f"{AUTH_URL}?{urllib.parse.urlencode(auth_params)}"
+    print(f"\n🔗 Authorization URL:\n{auth_url}")
+
+    print("\n2. After logging in, you’ll be redirected to:")
+    print(f"{REDIRECT_URI}?code=YOUR_CODE_HERE")
+    print("Copy the code parameter from the URL and paste it below:")
+
+    code = input("\nPaste the code here: ").strip()
+
+    # Exchange code for tokens
+    try:
+        response = requests.post(TOKEN_URL, data={
+            'client_id': CLIENT_ID,
+            'client_secret': CLIENT_SECRET,
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': REDIRECT_URI
+        })
+        response.raise_for_status()
+        tokens = response.json()
+        if save_tokens(tokens):
+            print("\n✅ Authorization successful. Tokens saved.")
+            return tokens['access_token']
+        else:
+            print("\n❌ Failed to save tokens.")
+            return None
+    except requests.exceptions.HTTPError as e:
+        print(f"\nHTTP error during token exchange: {e.response.status_code} - {e.response.text}")
+        log_operation('auth_error', {
+            'step': 'exchange',
+            'reason': e.response.text,
+            'status_code': e.response.status_code
+        })
+        return None
+    except Exception as e:
+        print(f"\nError during manual authorization: {e}")
+        log_operation('auth_error', {
+            'step': 'exchange',
+            'reason': str(e)
+        })
+        return None
+
+
 def main():
     try:
-        validate_config()
-        print("\n=== GHL OAuth Authentication ===")
+        print("== GHL OAuth Authentication ==")
         print("\nData Protection Rules:")
         print("1. Existing data is strictly read-only")
         print("2. No updates or modifications to existing records")
